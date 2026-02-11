@@ -1,15 +1,15 @@
-name: Universal Safe AI Agent
+name: Qwen3 Autonomous Agent
 
 on:
   push:
-    branches: [ "**" ] # يعمل مع كل الفروع
+    branches: [ "**" ]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  auto-heal:
+  qwen-heal:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -17,24 +17,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare Agent Environment
+      - name: Setup Python
         run: |
-          sudo apt-get update
           pip3 install requests
 
-      - name: Setup Java (If Android)
+      - name: Setup Java (Android Support)
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Universal Build Logic
+      - name: Universal Build & Capture
         id: build_step
-        continue-on-error: true # مهم جداً: لا يوقف العملية عند الفشل
+        continue-on-error: true
         run: |
-          echo "🔍 Detecting Project Type..."
-          
-          # يحاول تشغيل أوامر البناء حسب نوع الملفات الموجودة
+          echo "🔍 Analyzing Project Structure..."
           {
             if [ -f "gradlew" ]; then 
               chmod +x gradlew && ./gradlew assembleDebug
@@ -45,17 +42,18 @@ jobs:
             elif [ -f "Makefile" ]; then 
               make
             else
-              echo "⚠️ No build system found. Triggering analysis..."
+              echo "⚠️ No standard build system found."
+              ls -R
               exit 1
             fi
           } > universal_error.log 2>&1
 
-      - name: 🚑 Activate Safe Agent
-        if: steps.build_step.outcome == 'failure' # يعمل فقط إذا فشل البناء
+      - name: 🚑 Summon Qwen3 Agent
+        if: steps.build_step.outcome == 'failure'
         env:
-          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MY_ACCESS_TOKEN: ${{ secrets.MY_ACCESS_TOKEN }}
         run: |
-          echo "⚠️ Build Failed. Starting Safe Repair Sequence..."
+          echo "⚠️ Build Failed. Calling Qwen3 Coder (480B)..."
           python3 .github/scripts/ai_agent.py
           
