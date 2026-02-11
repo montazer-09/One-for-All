@@ -39,7 +39,7 @@ jobs:
           </head>
           <body>
               <div class="card">
-                  <h1>OMNI-OS PRO</h1>
+                  <h1>SmartTools Hub</h1>
                   <p>Production Build Ready</p>
                   <button onclick="window.UnityAdsAndroid ? window.UnityAdsAndroid.showInterstitial('Interstitial_Android') : alert('Ads Initializing...')">Show Reward Ad</button>
               </div>
@@ -49,9 +49,9 @@ jobs:
 
       - name: 📦 Initialize Capacitor Project
         run: |
-          echo '{"name":"omni-os-pro","version":"1.0.0","dependencies":{"@capacitor/android":"^6.0.0","@capacitor/core":"^6.0.0","@capacitor/cli":"^6.0.0"}}' > package.json
+          echo '{"name":"SmartTools-Hub","version":"1.0.0","dependencies":{"@capacitor/android":"^6.0.0","@capacitor/core":"^6.0.0","@capacitor/cli":"^6.0.0"}}' > package.json
           npm install
-          npx cap init "OMNI-OS PRO" "com.omni.pro.app" --web-dir www
+          npx cap init "SmartTools Hub" "com.SmartTools.Hub.app" --web-dir www
           npx cap add android
 
       - name: 💉 Inject Unity Ads SDK & Native Code
@@ -59,12 +59,12 @@ jobs:
           # إضافة المكتبة لملف Gradle
           sed -i '/dependencies {/a \    implementation "com.unity3d.ads:unity-ads:4.12.0"' android/app/build.gradle
           
-          # إنشاء مسار البلاجن المطابق للحزمة com.omni.pro.app
+          # إنشاء مسار البلاجن المطابق للحزمة com.SmartTools.Hub.app
           mkdir -p android/app/src/main/java/com/omni/pro/app/plugins
 
           # إنشاء كود الجافا للتحكم في الإعلانات
           cat > android/app/src/main/java/com/omni/pro/app/plugins/UnityAdsPlugin.java << 'EOF'
-          package com.omni.pro.app.plugins;
+          package com.SmartTools.Hub.app.plugins;
           import android.app.Activity;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebView;
@@ -118,6 +118,7 @@ jobs:
           alias: ${{ secrets.KEY_ALIAS }}
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
+          buildToolsVersion: 34.0.0
 
       - name: 📤 Upload Signed Artifact
         uses: actions/upload-artifact@v4
