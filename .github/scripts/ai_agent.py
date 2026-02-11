@@ -1,107 +1,131 @@
 import os
 import requests
 import subprocess
-import sys
+import json
 
-# === إعدادات الأمان ===
-SAFETY_THRESHOLD = 0.8  # (80%) لن يقبل التعديل إذا نقص حجم الملف عن هذه النسبة
+# === إعدادات الأمان والموديل ===
+SAFETY_THRESHOLD = 0.75  # حماية: يمنع حذف أكثر من 25% من الكود
+# اسم الموديل كما طلبته بالضبط من OpenRouter
+MODEL_ID = "qwen/qwen3-coder:free" 
 
 def get_file_size(path):
-    """إرجاع حجم الملف الحالي بالبايت"""
     return os.path.getsize(path) if os.path.exists(path) else 0
 
 def run_git_cmd(cmds):
     for cmd in cmds:
+        print(f"Executing: {cmd}")
         subprocess.run(cmd, shell=True, check=False)
 
-def solve_safely():
-    api_key = os.getenv("KIMI_API_KEY")
+def solve_with_qwen():
+    api_key = os.getenv("OPENROUTER_API_KEY")
     token = os.getenv("MY_ACCESS_TOKEN")
     repo = os.getenv("GITHUB_REPOSITORY")
     
-    # 1. قراءة سجل الخطأ
+    if not api_key:
+        print("❌ Error: OPENROUTER_API_KEY is missing.")
+        return
+
+    # قراءة سجل الأخطاء
     if not os.path.exists("universal_error.log"):
         print("No error log found.")
         return
 
     with open("universal_error.log", "r") as f:
-        # نقرأ آخر 4000 حرف فقط للتركيز على سبب الفشل الأخير
-        error_context = f.read()[-4000:]
+        error_context = f.read()[-6000:] # Qwen3 يتحمل سياقاً أكبر (Context)
 
-    # 2. هندسة الأوامر "الآمنة" (Safety Prompt)
+    # البرومبت الموجه لـ Qwen3 خصيصاً
     prompt = f"""
-    You are a Conservative Senior Developer. A build failed with this log:
+    You are an Autonomous AI DevOps Agent powered by Qwen3.
+    Target: Fix the build error in this repository.
+    
+    ERROR LOG:
     {error_context}
 
-    CRITICAL RULES (Follow strictly):
-    1. Identify the file causing the error and fix it.
-    2. DO NOT delete existing functions, classes, or logic. Only fix the specific error.
-    3. If the error is complex or requires deleting code, DO NOT fix it.
-    4. Provide the FULL content of the fixed file.
+    STRICT RULES:
+    1. Analyze the logic. Identify the specific file causing the failure.
+    2. Rewrite the FULL content of that file with the fix.
+    3. DO NOT remove existing features. Only fix the bug.
+    4. If the error implies missing config (like gradle wrapper), create it.
     
-    RESPONSE FORMAT:
-    FILE: [path/to/file]
-    CONTENT:
-    [full code here]
+    OUTPUT FORMAT (JSON ONLY):
+    {{
+        "filepath": "path/to/file.ext",
+        "content": "CODE_HERE"
+    }}
     """
 
+    # إعدادات OpenRouter
     headers = {
-        "Authorization": f"Bearer {api_key}", 
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": f"https://github.com/{repo}", # مطلوب لـ OpenRouter
+        "X-Title": "GitHub Auto-Fixer Agent"
     }
     
     payload = {
-        "model": "moonshot-v1-8k",
+        "model": MODEL_ID,
         "messages": [
-            {"role": "system", "content": "You are a code repair bot. You prioritize safety and stability."},
+            {"role": "system", "content": "You are a senior coding agent. Output valid JSON only."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.0  # صفر يعني دقة مطلقة وعدم تأليف
+        "temperature": 0.2, # منخفض للدقة
+        "response_format": {"type": "json_object"} # Qwen يدعم الـ JSON Mode
     }
 
-    print("🛡️ Agent is analyzing safely...")
+    print(f"🧠 Consulting {MODEL_ID} via OpenRouter...")
+    
     try:
-        response = requests.post("https://api.moonshot.cn/v1/chat/completions", json=payload, headers=headers)
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
+        
         if response.status_code != 200:
             print(f"❌ API Error: {response.text}")
             return
 
-        res_text = response.json()['choices'][0]['message']['content']
+        result = response.json()
         
-        # استخراج البيانات
-        file_path = res_text.split("FILE:")[1].split("CONTENT:")[0].strip()
-        fixed_code = res_text.split("CONTENT:")[1].strip()
+        # استخراج الرد (قد يحتاج تنظيفاً من علامات Markdown)
+        raw_content = result['choices'][0]['message']['content']
+        # تنظيف الرد إذا كان يحتوي على ```json
+        if "```json" in raw_content:
+            raw_content = raw_content.split("```json")[1].split("```")[0]
+        elif "```" in raw_content:
+            raw_content = raw_content.split("```")[1].split("```")[0]
 
-        # === 3. تفعيل حواجز الأمان (Safety Guardrails) ===
+        ai_data = json.loads(raw_content)
+        file_path = ai_data["filepath"]
+        fixed_code = ai_data["content"]
+
+        # === حواجز الأمان (Safety Guardrails) ===
         old_size = get_file_size(file_path)
         new_size = len(fixed_code)
 
-        # إذا كان الملف موجوداً وحاول الذكاء الاصطناعي تقليصه بشكل مريب
         if old_size > 0 and new_size < (old_size * SAFETY_THRESHOLD):
-            print(f"⚠️ SAFETY ALERT: The agent tried to delete huge parts of '{file_path}'.")
-            print(f"Old Size: {old_size}, New Size: {new_size}. Operation Aborted.")
+            print(f"⚠️ SAFETY STOP: Qwen tried to delete too much code ({old_size} -> {new_size}). Fix rejected.")
             return
 
-        # 4. تطبيق الإصلاح والحفظ
+        # تطبيق الإصلاح
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "w") as f:
             f.write(fixed_code)
 
-        # 5. الرفع للمستودع (Push)
-        remote = f"https://x-access-token:{token}@github.com/{repo}.git"
+        # الرفع
+        remote = f"https://x-access-token:{token}@[github.com/](https://github.com/){repo}.git"
         run_git_cmd([
             f"git remote set-url origin {remote}",
-            "git config --global user.name 'AI-Safe-Agent'",
-            "git config --global user.email 'agent@safe-mode.ai'",
+            "git config --global user.name 'Qwen3-Agent'",
+            "git config --global user.email 'qwen@openrouter.ai'",
             f"git add {file_path}",
-            f"git commit -m 'fix: AI repaired {os.path.basename(file_path)} (Safe Mode)'",
+            f"git commit -m 'fix: Qwen3 auto-repair for {os.path.basename(file_path)}'",
             "git push"
         ])
-        print(f"✅ Successfully repaired {file_path}")
+        print(f"✅ Qwen3 successfully repaired {file_path}!")
 
     except Exception as e:
-        print(f"❌ Failed to parse or apply fix: {e}")
+        print(f"❌ Execution Failed: {str(e)}")
+        # طباعة الرد الخام للمساعدة في التصحيح
+        if 'raw_content' in locals():
+            print(f"Raw AI Response: {raw_content[:500]}...")
 
 if __name__ == "__main__":
-    solve_safely()
+    solve_with_qwen()
     
