@@ -3,113 +3,105 @@ import requests
 import subprocess
 import sys
 
-# إعدادات الألوان للطباعة (لسهولة القراءة في الـ Logs)
-CYAN = '\033[96m'
-GREEN = '\033[92m'
-RED = '\033[91m'
-RESET = '\033[0m'
+# === إعدادات الأمان ===
+SAFETY_THRESHOLD = 0.8  # (80%) لن يقبل التعديل إذا نقص حجم الملف عن هذه النسبة
 
-def run_cmd(cmd):
-    """تشغيل أوامر النظام وإرجاع النتيجة"""
-    try:
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        return e.stderr.strip()
+def get_file_size(path):
+    """إرجاع حجم الملف الحالي بالبايت"""
+    return os.path.getsize(path) if os.path.exists(path) else 0
 
-def get_kimi_fix(error_log):
-    """إرسال الخطأ إلى Kimi AI والحصول على الحل"""
+def run_git_cmd(cmds):
+    for cmd in cmds:
+        subprocess.run(cmd, shell=True, check=False)
+
+def solve_safely():
     api_key = os.getenv("KIMI_API_KEY")
-    if not api_key:
-        print(f"{RED}Error: KIMI_API_KEY is missing!{RESET}")
-        sys.exit(1)
-
-    url = "https://api.moonshot.cn/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-
-    # هندسة الأوامر (Prompt Engineering) لضمان الدقة
-    prompt = f"""
-    CRITICAL BUILD ERROR DETECTED:
-    {error_log}
-
-    You are a Senior DevOps & Software Architect.
-    TASK:
-    1. Analyze the error log.
-    2. Identify the SPECIFIC file causing the error.
-    3. Rewrite the COMPLETE file with the fix applied.
+    token = os.getenv("MY_ACCESS_TOKEN")
+    repo = os.getenv("GITHUB_REPOSITORY")
     
-    OUTPUT FORMAT (Strictly follow this):
-    <<<FILE_PATH>>>
-    path/to/faulty/file.ext
-    <<<CODE_START>>>
-    [Put the complete fixed code here]
-    <<<CODE_END>>>
+    # 1. قراءة سجل الخطأ
+    if not os.path.exists("universal_error.log"):
+        print("No error log found.")
+        return
+
+    with open("universal_error.log", "r") as f:
+        # نقرأ آخر 4000 حرف فقط للتركيز على سبب الفشل الأخير
+        error_context = f.read()[-4000:]
+
+    # 2. هندسة الأوامر "الآمنة" (Safety Prompt)
+    prompt = f"""
+    You are a Conservative Senior Developer. A build failed with this log:
+    {error_context}
+
+    CRITICAL RULES (Follow strictly):
+    1. Identify the file causing the error and fix it.
+    2. DO NOT delete existing functions, classes, or logic. Only fix the specific error.
+    3. If the error is complex or requires deleting code, DO NOT fix it.
+    4. Provide the FULL content of the fixed file.
+    
+    RESPONSE FORMAT:
+    FILE: [path/to/file]
+    CONTENT:
+    [full code here]
     """
 
-    data = {
+    headers = {
+        "Authorization": f"Bearer {api_key}", 
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
         "model": "moonshot-v1-8k",
         "messages": [
-            {"role": "system", "content": "You are an autonomous code-fixing agent."},
+            {"role": "system", "content": "You are a code repair bot. You prioritize safety and stability."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2  # درجة منخفضة للدقة العالية
+        "temperature": 0.0  # صفر يعني دقة مطلقة وعدم تأليف
     }
 
-    print(f"{CYAN}🤖 Asking Kimi for a solution...{RESET}")
-    response = requests.post(url, headers=headers, json=data)
-    
-    if response.status_code == 200:
-        return response.json()['choices'][0]['message']['content']
-    else:
-        print(f"{RED}API Error: {response.text}{RESET}")
-        return None
-
-def apply_fix_and_push(ai_response):
-    """تطبيق الحل وعمل Push للمستودع"""
+    print("🛡️ Agent is analyzing safely...")
     try:
-        # استخراج مسار الملف والكود من رد الذكاء الاصطناعي
-        file_path = ai_response.split("<<<FILE_PATH>>>")[1].split("<<<CODE_START>>>")[0].strip()
-        code_content = ai_response.split("<<<CODE_START>>>")[1].split("<<<CODE_END>>>")[0].strip()
+        response = requests.post("https://api.moonshot.cn/v1/chat/completions", json=payload, headers=headers)
+        if response.status_code != 200:
+            print(f"❌ API Error: {response.text}")
+            return
 
-        print(f"{GREEN}✔ Fixing file: {file_path}{RESET}")
+        res_text = response.json()['choices'][0]['message']['content']
+        
+        # استخراج البيانات
+        file_path = res_text.split("FILE:")[1].split("CONTENT:")[0].strip()
+        fixed_code = res_text.split("CONTENT:")[1].strip()
 
-        # كتابة الكود الجديد
+        # === 3. تفعيل حواجز الأمان (Safety Guardrails) ===
+        old_size = get_file_size(file_path)
+        new_size = len(fixed_code)
+
+        # إذا كان الملف موجوداً وحاول الذكاء الاصطناعي تقليصه بشكل مريب
+        if old_size > 0 and new_size < (old_size * SAFETY_THRESHOLD):
+            print(f"⚠️ SAFETY ALERT: The agent tried to delete huge parts of '{file_path}'.")
+            print(f"Old Size: {old_size}, New Size: {new_size}. Operation Aborted.")
+            return
+
+        # 4. تطبيق الإصلاح والحفظ
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "w") as f:
-            f.write(code_content)
+            f.write(fixed_code)
 
-        # إعداد Git باستخدام التوكن الخاص بك
-        token = os.getenv("MY_ACCESS_TOKEN")
-        repo = os.getenv("GITHUB_REPOSITORY")
-        
-        # أمر سحري للمصادقة باستخدام التوكن
-        run_cmd(f"git remote set-url origin https://x-access-token:{token}@github.com/{repo}.git")
-        run_cmd("git config --global user.name 'Kimi-Auto-Fixer'")
-        run_cmd("git config --global user.email 'ai@bot.com'")
-        
-        # الرفع (Commit & Push)
-        run_cmd(f"git add {file_path}")
-        commit_msg = f"fix: AI auto-repair for {os.path.basename(file_path)}"
-        run_cmd(f"git commit -m '{commit_msg}'")
-        run_cmd("git push")
-        
-        print(f"{GREEN}🚀 Successfully pushed fix to repository!{RESET}")
+        # 5. الرفع للمستودع (Push)
+        remote = f"https://x-access-token:{token}@github.com/{repo}.git"
+        run_git_cmd([
+            f"git remote set-url origin {remote}",
+            "git config --global user.name 'AI-Safe-Agent'",
+            "git config --global user.email 'agent@safe-mode.ai'",
+            f"git add {file_path}",
+            f"git commit -m 'fix: AI repaired {os.path.basename(file_path)} (Safe Mode)'",
+            "git push"
+        ])
+        print(f"✅ Successfully repaired {file_path}")
 
     except Exception as e:
-        print(f"{RED}❌ Failed to apply fix: {str(e)}\nResponse was:\n{ai_response}{RESET}")
+        print(f"❌ Failed to parse or apply fix: {e}")
 
 if __name__ == "__main__":
-    # قراءة ملف الخطأ الذي تم توليده من الخطوة السابقة
-    if os.path.exists("build_error.log"):
-        with open("build_error.log", "r") as f:
-            log_content = f.read()
-            # نرسل فقط آخر 2000 حرف لتوفير التوكيز والتركيز على الخطأ الأخير
-            fix = get_kimi_fix(log_content[-4000:])
-            if fix:
-                apply_fix_and_push(fix)
-    else:
-        print("No error log found.")
-      
+    solve_safely()
+    
