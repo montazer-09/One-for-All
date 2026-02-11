@@ -1,56 +1,61 @@
-name: Ultimate Self-Healing CI
+name: Universal Safe AI Agent
 
 on:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
+    branches: [ "**" ] # يعمل مع كل الفروع
+  workflow_dispatch:
 
 permissions:
-  contents: write  # صلاحية الكتابة للمستودع
+  contents: write
 
 jobs:
-  build-and-heal:
+  auto-heal:
     runs-on: ubuntu-latest
-    
-        steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Environment
-      run: |
-        sudo apt-get update
-        pip3 install requests
+      - name: Prepare Agent Environment
+        run: |
+          sudo apt-get update
+          pip3 install requests
 
-    - name: Attempt Build (Universal & Resilient)
-      id: build_step
-      # "continue-on-error" تضمن أن الـ Workflow لن يتوقف هنا بل سيكمل للوكيل
-      continue-on-error: true 
-      run: |
-        echo "🚀 Starting Universal Build Discovery..."
-        {
-          # محاولة التعرف على نوع المشروع وتشغيله
-          if [ -f "gradlew" ]; then
-            chmod +x gradlew && ./gradlew assembleDebug
-          elif [ -f "package.json" ]; then
-            npm install && npm run build
-          elif [ -f "requirements.txt" ]; then
-            pip install -r requirements.txt
-          else
-            # إذا لم يجد شيئاً، سيفتعل خطأ ليقوم الوكيل بتحليل المستودع
-            echo "Error: No build system (Gradle/NPM/Pip) detected in root!"
-            exit 1
-          fi
-        } > build_error.log 2>&1
+      - name: Setup Java (If Android)
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-    - name: 🚑 Activate AI Agent
-      # هذا الشرط يضمن عمل الوكيل إذا فشلت الخطوة السابقة لأي سبب كان
-      if: steps.build_step.outcome == 'failure'
-      env:
-        KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
-        MY_ACCESS_TOKEN: ${{ secrets.MY_ACCESS_TOKEN }}
-      run: |
-        echo "⚠️ Failure detected. Summoning AI Agent to investigate..."
-        python3 .github/scripts/ai_agent.py
-        
+      - name: Universal Build Logic
+        id: build_step
+        continue-on-error: true # مهم جداً: لا يوقف العملية عند الفشل
+        run: |
+          echo "🔍 Detecting Project Type..."
+          
+          # يحاول تشغيل أوامر البناء حسب نوع الملفات الموجودة
+          {
+            if [ -f "gradlew" ]; then 
+              chmod +x gradlew && ./gradlew assembleDebug
+            elif [ -f "package.json" ]; then 
+              npm install && npm run build
+            elif [ -f "requirements.txt" ]; then 
+              pip install -r requirements.txt
+            elif [ -f "Makefile" ]; then 
+              make
+            else
+              echo "⚠️ No build system found. Triggering analysis..."
+              exit 1
+            fi
+          } > universal_error.log 2>&1
+
+      - name: 🚑 Activate Safe Agent
+        if: steps.build_step.outcome == 'failure' # يعمل فقط إذا فشل البناء
+        env:
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          MY_ACCESS_TOKEN: ${{ secrets.MY_ACCESS_TOKEN }}
+        run: |
+          echo "⚠️ Build Failed. Starting Safe Repair Sequence..."
+          python3 .github/scripts/ai_agent.py
+          
