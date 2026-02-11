@@ -1024,6 +1024,47 @@
 <!-- ═══════════════════════════════════════════════════════════════════════════
      *  JAVASCRIPT ENGINE - PRODUCTION READY
      * ═══════════════════════════════════════════════════════════════════════════ -->
+<script>
+const AppConfig = {
+  app: {
+    name: 'OMNI-OS PRO',
+    version: '13.0',
+    gameId: '6043972'
+  },
+  ads: {
+    bannerPlacement: 'Banner_Android',
+    interstitialInterval: 3 * 60 * 1000,
+    rewardedInterval: 5 * 60 * 1000,
+    bannerShowDelay: 1000
+  },
+  currency: {
+    rates: {
+      USD: 1, EUR: 0.92, SAR: 3.75, AED: 3.67, EGP: 47.5, JOD: 0.71
+    }
+  },
+  timezone: {
+    cities: [
+      {name: 'مكة المكرمة', zone: 'Asia/Riyadh', flag: '🇸🇦'},
+      {name: 'القاهرة', zone: 'Africa/Cairo', flag: '🇪🇬'},
+      {name: 'دبي', zone: 'Asia/Dubai', flag: '🇦🇪'},
+      {name: 'نيويورك', zone: 'America/New_York', flag: '🇺🇸'},
+      {name: 'لندن', zone: 'Europe/London', flag: '🇬🇧'},
+      {name: 'طوكيو', zone: 'Asia/Tokyo', flag: '🇯🇵'},
+      {name: 'باريس', zone: 'Europe/Paris', flag: '🇫🇷'},
+      {name: 'سيدني', zone: 'Australia/Sydney', flag: '🇦🇺'}
+    ]
+  },
+  validation: {
+    maxAmount: 999999999, minAmount: 0, maxYears: 50, minLoanAmount: 1000,
+    passwordMinLength: 6, passwordMaxLength: 32, timerMaxSeconds: 3600
+  },
+  audio: {
+    frequencies: {click: 600, beep: 800, success: 1200, error: 400},
+    durations: {click: 30, beep: 50, success: 100, error: 150},
+    volumes: {click: 0.15, beep: 0.2, success: 0.25, error: 0.3}
+  }
+};
+</script>
 <script src="https://unpkg.com/@capacitor/core@latest/dist/capacitor.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
@@ -1060,6 +1101,11 @@ const Ads = {
 
                         // Start auto rewarded (every 5 minutes)
                         Ads.startRewardedTimer();
+                    } else if(event === 'banner' && data.success && data.action === 'loaded') {
+                        console.log('[Banner] Loaded successfully - displayed at bottom');
+                    } else if(event === 'banner' && !data.success) {
+                        console.error('[Banner] Failed to load:', data.error);
+                        document.getElementById('banner-ad-container').classList.remove('hidden');
                     } else if(event === 'rewarded' && data.success) {
                         Toast.show('🎉 شكراً! حصلت على مكافأة!', 'success');
                     }
@@ -1082,7 +1128,7 @@ const Ads = {
             if(typeof UnityAdsAndroid !== 'undefined') {
                 UnityAdsAndroid.showBanner('Banner_Android');
                 document.getElementById('banner-ad-container').classList.add('hidden');
-                console.log('[Banner] Shown');
+                console.log('[Banner] Requested to show');
             }
         } catch(e) {
             console.error('[Banner] Error:', e);
@@ -1090,8 +1136,15 @@ const Ads = {
     },
 
     hideBanner: () => {
-        document.getElementById('banner-ad-container').classList.remove('hidden');
-        console.log('[Banner] Hidden (placeholder shown)');
+        try {
+            if(typeof UnityAdsAndroid !== 'undefined') {
+                UnityAdsAndroid.hideBanner();
+                console.log('[Banner] Hidden from Unity Ads');
+            }
+            document.getElementById('banner-ad-container').classList.remove('hidden');
+        } catch(e) {
+            console.error('[Banner] Hide error:', e);
+        }
     },
 
     toggleBanner: () => {
@@ -1149,6 +1202,7 @@ const Ads = {
  * ═══════════════════════════════════════════════════════════════════════════ */
 const App = {
     init: () => {
+        AudioSystem.init();
         const savedNotes = localStorage.getItem('omni_notes');
         if(savedNotes) document.getElementById('notepad').value = savedNotes;
         Calc.renderHistory();
@@ -1202,6 +1256,7 @@ const Calc = {
 
     input: (val, type) => {
         if(Settings.haptic && navigator.vibrate) navigator.vibrate(5);
+        AudioSystem.click();
         if(type === 'ac') {
             Calc.inputStr = '0';
             document.getElementById('history-line').innerText = '';
@@ -1220,13 +1275,42 @@ const Calc = {
         document.getElementById('mode-indicator').innerText = Calc.angle.toUpperCase();
     },
 
+    evaluate: (expr) => {
+        const whitelist = /^[0-9+\-*/.()^pi e sqrt sin cos tan log ln inv fact abs rnd Math.PI Math.E Math.sin Math.cos Math.tan Math.log Math.log10 Math.sqrt Math.abs Math.random\s]*$/;
+        if(!whitelist.test(expr)) {
+            throw new Error('Invalid characters in expression');
+        }
+
+        const mathContext = {
+            Math: Math,
+            ...Object.getOwnPropertyNames(Math).reduce((acc, name) => {
+                if(typeof Math[name] === 'function') acc[name] = Math[name];
+                return acc;
+            }, {})
+        };
+
+        try {
+            return Function(...Object.keys(mathContext), `"use strict"; return (${expr})`)(
+                ...Object.values(mathContext)
+            );
+        } catch(e) {
+            throw new Error('Invalid mathematical expression');
+        }
+    },
+
     solve: () => {
         if(Settings.haptic && navigator.vibrate) navigator.vibrate(10);
         try {
             const raw = Calc.inputStr;
-            let expr = raw.replace(/pi/g, 'Math.PI').replace(/e/g, 'Math.E').replace(/sqrt/g, 'Math.sqrt');
+            if(!raw || raw === '0') {
+                Calc.inputStr = 'Error';
+                Calc.update();
+                return;
+            }
+
+            let expr = raw.replace(/pi/g, 'Math.PI').replace(/e(?![+\-*/)])/g, 'Math.E').replace(/sqrt/g, 'Math.sqrt');
             expr = expr.replace(/\^/g, '**');
-            
+
             if(Calc.angle === 'deg') {
                 expr = expr.replace(/sin\(([^)]+)\)/g, 'Math.sin($1*Math.PI/180)');
                 expr = expr.replace(/cos\(([^)]+)\)/g, 'Math.cos($1*Math.PI/180)');
@@ -1240,16 +1324,25 @@ const Calc = {
             expr = expr.replace(/fact\(([^)]+)\)/g, 'Calc.factorial($1)');
             expr = expr.replace(/abs\(([^)]+)\)/g, 'Math.abs($1)');
             expr = expr.replace(/rnd/g, 'Math.random()');
-            
-            const res = Function('"use strict";return (' + expr + ')')();
-            const out = parseFloat(res.toPrecision(12)).toString();
-            Calc.inputStr = out;
-            Calc.history.unshift({eq: raw, res: out});
-            localStorage.setItem('omni_hist', JSON.stringify(Calc.history));
-            Calc.renderHistory();
-            document.getElementById('history-line').innerText = raw + ' =';
+
+            const res = Calc.evaluate(expr);
+
+            if(!isFinite(res)) {
+                Calc.inputStr = 'Infinity';
+                AudioSystem.beep();
+            } else {
+                const out = parseFloat(res.toPrecision(12)).toString();
+                Calc.inputStr = out;
+                Calc.history.unshift({eq: raw, res: out});
+                localStorage.setItem('omni_hist', JSON.stringify(Calc.history));
+                Calc.renderHistory();
+                document.getElementById('history-line').innerText = raw + ' =';
+                AudioSystem.success();
+            }
         } catch(e) {
+            console.error('[Calculator] Evaluation error:', e.message);
             Calc.inputStr = 'Error';
+            AudioSystem.error();
         }
         Calc.update();
     },
@@ -1626,22 +1719,52 @@ const Features = {
     
     // Currency
     convertCurrency: () => {
-        const rates = {USD:1, EUR:0.92, SAR:3.75, AED:3.67, EGP:47.5, JOD:0.71};
-        const amount = parseFloat(document.getElementById('curr-amount').value);
-        const from = document.getElementById('curr-from').value;
-        const to = document.getElementById('curr-to').value;
-        const result = (amount / rates[from]) * rates[to];
-        document.getElementById('curr-result').innerText = result.toFixed(2) + ' ' + to;
+        try {
+            const rates = {USD:1, EUR:0.92, SAR:3.75, AED:3.67, EGP:47.5, JOD:0.71};
+            const amount = parseFloat(document.getElementById('curr-amount').value);
+            const from = document.getElementById('curr-from').value;
+            const to = document.getElementById('curr-to').value;
+
+            if(!amount || isNaN(amount) || amount < 0) {
+                throw new Error('أدخل مبلغاً صحيحاً');
+            }
+
+            const result = (amount / rates[from]) * rates[to];
+            if(!isFinite(result)) {
+                throw new Error('خطأ في الحساب');
+            }
+
+            document.getElementById('curr-result').innerText = result.toFixed(2) + ' ' + to;
+            AudioSystem.success();
+        } catch(e) {
+            console.error('[Currency] Error:', e.message);
+            document.getElementById('curr-result').innerText = '❌ ' + e.message;
+            AudioSystem.error();
+        }
     },
     
     // Loan
     calculateLoan: () => {
-        const P = parseFloat(document.getElementById('loan-amount').value);
-        const r = parseFloat(document.getElementById('loan-rate').value) / 100 / 12;
-        const n = parseFloat(document.getElementById('loan-years').value) * 12;
-        const monthly = (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-        const total = monthly * n;
-        document.getElementById('loan-result').innerHTML = `
+        try {
+            const P = parseFloat(document.getElementById('loan-amount').value);
+            const r = parseFloat(document.getElementById('loan-rate').value) / 100 / 12;
+            const n = parseFloat(document.getElementById('loan-years').value) * 12;
+
+            if(!P || isNaN(P) || P <= 0) {
+                throw new Error('أدخل مبلغ القرض بشكل صحيح');
+            }
+            if(isNaN(r) || isNaN(n) || n <= 0) {
+                throw new Error('أدخل معدل الفائدة والسنوات بشكل صحيح');
+            }
+
+            const monthly = (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+            const total = monthly * n;
+
+            if(!isFinite(monthly) || !isFinite(total)) {
+                throw new Error('خطأ في الحساب');
+            }
+
+            document.getElementById('loan-result').innerHTML = `
             <div class="card">
                 <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
                     <span style="color:var(--text-sec);">القسط الشهري</span>
@@ -1657,8 +1780,14 @@ const Features = {
                 </div>
             </div>
         `;
+            AudioSystem.success();
+        } catch(e) {
+            console.error('[Loan] Error:', e.message);
+            document.getElementById('loan-result').innerHTML = '<div class="card" style="color:var(--danger);">❌ ' + e.message + '</div>';
+            AudioSystem.error();
+        }
     },
-    
+
     // Timezone
     timezoneInterval: null,
     updateTimezones: () => {
@@ -2006,22 +2135,72 @@ const Toast = {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ *  AUDIO SYSTEM
+ * ═══════════════════════════════════════════════════════════════════════════ */
+const AudioSystem = {
+    ctx: null,
+
+    init: () => {
+        try {
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            AudioSystem.ctx = new AudioContext();
+        } catch(e) {
+            console.warn('[Audio] Web Audio API not available:', e.message);
+        }
+    },
+
+    play: (frequency = 800, duration = 50, volume = 0.3, typeKey = null) => {
+        if(typeKey && AppConfig && AppConfig.audio) {
+            frequency = AppConfig.audio.frequencies[typeKey] || frequency;
+            duration = AppConfig.audio.durations[typeKey] || duration;
+            volume = AppConfig.audio.volumes[typeKey] || volume;
+        }
+        if(!Settings.sound || !AudioSystem.ctx) return;
+        try {
+            const now = AudioSystem.ctx.currentTime;
+            const osc = AudioSystem.ctx.createOscillator();
+            const gain = AudioSystem.ctx.createGain();
+
+            osc.connect(gain);
+            gain.connect(AudioSystem.ctx.destination);
+
+            osc.frequency.value = frequency;
+            osc.type = 'sine';
+
+            gain.gain.setValueAtTime(volume, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + duration / 1000);
+
+            osc.start(now);
+            osc.stop(now + duration / 1000);
+        } catch(e) {
+            console.error('[Audio] Playback error:', e.message);
+        }
+    },
+
+    beep: () => AudioSystem.play(800, 50, 0.2),
+    success: () => AudioSystem.play(1200, 100, 0.25),
+    error: () => AudioSystem.play(400, 150, 0.3),
+    click: () => AudioSystem.play(600, 30, 0.15)
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
  *  SETTINGS
  * ═══════════════════════════════════════════════════════════════════════════ */
 const Settings = {
     haptic: localStorage.getItem('haptic') !== 'false',
     sound: localStorage.getItem('sound') === 'true',
-    
+
     toggleHaptic: () => {
         Settings.haptic = !Settings.haptic;
         localStorage.setItem('haptic', Settings.haptic);
     },
-    
+
     toggleSound: () => {
         Settings.sound = !Settings.sound;
         localStorage.setItem('sound', Settings.sound);
+        if(Settings.sound) AudioSystem.success();
     },
-    
+
     factoryReset: () => {
         if(confirm('هل أنت متأكد؟ سيتم حذف جميع البيانات!')) {
             localStorage.clear();
@@ -2029,6 +2208,15 @@ const Settings = {
         }
     }
 };
+
+// Register Service Worker for offline support
+if('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/service-worker.js').then(() => {
+        console.log('[Service Worker] Registered successfully');
+    }).catch((err) => {
+        console.warn('[Service Worker] Registration failed:', err.message);
+    });
+}
 
 // Initialize
 window.onload = App.init;
