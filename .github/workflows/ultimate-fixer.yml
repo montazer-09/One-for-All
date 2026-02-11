@@ -1,0 +1,52 @@
+name: Ultimate Self-Healing CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+
+permissions:
+  contents: write  # صلاحية الكتابة للمستودع
+
+jobs:
+  build-and-heal:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # جلب التاريخ كاملاً لتجنب مشاكل الـ Push
+
+    - name: Set up Environment (Auto-Detect)
+      run: |
+        # تثبيت بايثون لتشغيل السكريبت الخاص بنا
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+        pip3 install requests
+
+    - name: Set up Java (For Android)
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Attempt Build (Universal)
+      id: build_attempt
+      # هنا الأوامر التي تحاول البناء، إذا فشلت يتم حفظ الخطأ ولا يتوقف السكريبت
+      run: |
+        echo "🚀 Starting Build..."
+        
+        # عدل هذا السطر حسب نوع مشروعك (مثال للأندرويد)
+        chmod +x gradlew
+        ./gradlew assembleDebug > build_error.log 2>&1 || echo "BUILD_FAILED=true" >> $GITHUB_ENV
+
+    - name: 🚑 Activate AI Agent
+      if: env.BUILD_FAILED == 'true'
+      env:
+        KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+        MY_ACCESS_TOKEN: ${{ secrets.MY_ACCESS_TOKEN }} # التوكن الخاص بك
+      run: |
+        echo "⚠️ Build Failed! Summoning Kimi Agent..."
+        python3 .github/scripts/ai_agent.py
+        
