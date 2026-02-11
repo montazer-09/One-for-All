@@ -12,41 +12,45 @@ jobs:
   build-and-heal:
     runs-on: ubuntu-latest
     
-    steps:
+        steps:
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0 # جلب التاريخ كاملاً لتجنب مشاكل الـ Push
+        fetch-depth: 0
 
-    - name: Set up Environment (Auto-Detect)
+    - name: Set up Environment
       run: |
-        # تثبيت بايثون لتشغيل السكريبت الخاص بنا
         sudo apt-get update
-        sudo apt-get install -y python3-pip
         pip3 install requests
 
-    - name: Set up Java (For Android)
-      uses: actions/setup-java@v3
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-
-    - name: Attempt Build (Universal)
-      id: build_attempt
-      # هنا الأوامر التي تحاول البناء، إذا فشلت يتم حفظ الخطأ ولا يتوقف السكريبت
+    - name: Attempt Build (Universal & Resilient)
+      id: build_step
+      # "continue-on-error" تضمن أن الـ Workflow لن يتوقف هنا بل سيكمل للوكيل
+      continue-on-error: true 
       run: |
-        echo "🚀 Starting Build..."
-        
-        # عدل هذا السطر حسب نوع مشروعك (مثال للأندرويد)
-        chmod +x gradlew
-        ./gradlew assembleDebug > build_error.log 2>&1 || echo "BUILD_FAILED=true" >> $GITHUB_ENV
+        echo "🚀 Starting Universal Build Discovery..."
+        {
+          # محاولة التعرف على نوع المشروع وتشغيله
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew && ./gradlew assembleDebug
+          elif [ -f "package.json" ]; then
+            npm install && npm run build
+          elif [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            # إذا لم يجد شيئاً، سيفتعل خطأ ليقوم الوكيل بتحليل المستودع
+            echo "Error: No build system (Gradle/NPM/Pip) detected in root!"
+            exit 1
+          fi
+        } > build_error.log 2>&1
 
     - name: 🚑 Activate AI Agent
-      if: env.BUILD_FAILED == 'true'
+      # هذا الشرط يضمن عمل الوكيل إذا فشلت الخطوة السابقة لأي سبب كان
+      if: steps.build_step.outcome == 'failure'
       env:
         KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
-        MY_ACCESS_TOKEN: ${{ secrets.MY_ACCESS_TOKEN }} # التوكن الخاص بك
+        MY_ACCESS_TOKEN: ${{ secrets.MY_ACCESS_TOKEN }}
       run: |
-        echo "⚠️ Build Failed! Summoning Kimi Agent..."
+        echo "⚠️ Failure detected. Summoning AI Agent to investigate..."
         python3 .github/scripts/ai_agent.py
         
