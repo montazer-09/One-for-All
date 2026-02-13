@@ -86,27 +86,38 @@
             to { transform: rotate(360deg); }
         }
 
-        /* ═══ BANNER AD CONTAINER ═══ */
-        #banner-ad-container {
-            position: fixed;
-            bottom: calc(var(--nav-height) + var(--safe-bottom));
-            left: 0;
-            width: 100%;
-            height: var(--banner-height);
-            background: var(--bg-panel);
-            border-top: 1px solid rgba(255,255,255,0.05);
-            z-index: 90;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-        }
-        
-        #banner-ad-container.hidden {
-            display: none;
-        }
+/* ═══ BANNER AD CONTAINER ═══ */
+#banner-ad-container {
+    position: fixed;
+    /* 1. استخدام env للتعامل مع الحواف الآمنة في الهواتف الحديثة */
+    bottom: calc(var(--nav-height, 60px) + env(safe-area-inset-bottom, 0px));
+    left: 0;
+    width: 100%;
+    /* 2. تحديد ارتفاع ثابت كقيمة احتياطية لمنع انهيار الحاوية */
+    height: var(--banner-height, 50px);
+    background: var(--bg-panel, #1a1a1a);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    
+    /* 3. رفع الأولوية لضمان الظهور فوق محتوى الصفحة */
+    z-index: 1000; 
+    
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    color: var(--text-muted, #888);
+    
+    /* 4. منع تفاعل اللمس مع المساحات الفارغة حول الإعلان */
+    pointer-events: auto;
+    /* 5. تحسين أداء العرض */
+    contain: content;
+    overflow: hidden;
+}
 
+#banner-ad-container.hidden {
+    display: none !important;
+}
+        
         /* ═══ MAIN VIEWPORT ═══ */
         #viewport {
             flex: 1;
